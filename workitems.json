@@ -1,6 +1,4 @@
-{
-    "search_phrase": "economy",
-    "news_category": "business",
-    "months": 1
-  }
+[
+    {"search_phrase": "Artificial Intelligence", "news_category": "Technology", "months": 3}
+]
   

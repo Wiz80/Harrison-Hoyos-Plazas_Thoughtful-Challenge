@@ -1,4 +1,7 @@
 from RPA.Browser.Selenium import Selenium
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from RPA.Excel.Files import Files
 from RPA.HTTP import HTTP
 from datetime import datetime
@@ -16,64 +19,106 @@ class NewsScraper:
         self.news_data = []
 
     def open_website(self, url):
-        """Open the Yahoo News website."""
+        """Open the News website."""
         self.browser.open_available_browser(url)
 
-    def search_news(self, search_phrase):
-        """Enter the search phrase in the search field and perform the search."""
-        self.browser.input_text("//input[@id='header-search-input']", search_phrase)
-        self.browser.press_keys("//input[@id='header-search-input']", "ENTER")
+    def click_search_button(self):
+        """Wait for the search button to be clickable and click it."""
+        try:
+            # Espera explícita para que el botón esté disponible
+            wait = WebDriverWait(self.browser.driver, 10)
+            
+            # Localiza el formulario por su clase
+            form_element = wait.until(EC.presence_of_element_located((By.XPATH, '//form[contains(@class, "search-bar__form")]')))
+            
+            # Dentro del formulario, busca el botón con el texto 'Search'
+            search_button = form_element.find_element(By.XPATH, './/button[@type="submit" and contains(@class, "css-sp7gd")]')
+            
+            # Haz clic en el botón
+            search_button.click()
+            
+            print("Search button clicked successfully.")
+        except Exception as e:
+            print(f"Error clicking the search button: {e}")
+
+        
+    def click_show_more(self):
+        """Click the 'Show More' button after scrolling it into view."""
+        try:
+            # Encuentra el botón "Show More"
+            show_more_button = self.browser.find_element('//button[contains(@class, "show-more-button")]')
+            
+            # Desplaza la página hasta que el botón sea visible
+            self.browser.scroll_element_into_view(show_more_button)
+            
+            # Haz clic en el botón
+            self.browser.click_element(show_more_button)
+            
+            print("Clicked 'Show More' button")
+        except Exception as e:
+            print("No more 'Show More' button available or an error occurred", e)
+
+    def extract_news_data(self, search_phrase, months):
+        """Extract news data from the page."""
+        current_date = datetime.now()
+
+        try:
+            # Espera explícita para que se carguen los elementos de noticias
+            wait = WebDriverWait(self.browser.driver, 10)
+            
+            # Espera hasta que se encuentren los elementos de noticias
+            wait.until(EC.presence_of_all_elements_located((By.XPATH, '//div[contains(@class, "gc__content")]')))
+            
+            # Encuentra todos los elementos de noticias usando el método de RPA.Browser.Selenium
+            news_elements = self.browser.find_elements("xpath://div[contains(@class, 'gc__content')]")
+
+            for news in news_elements:
+                try:
+                    # Extrae el título
+                    title_element = news.find_element("xpath:.//h3[contains(@class, 'gc__title')]/a")
+                    title = title_element.find_element_by_xpath(".//span").text  # Extrae el texto del span dentro del tag <a>
+                    url = title_element.get_attribute("href")
+
+                    # Extrae la descripción
+                    description_element = news.find_element("xpath:.//div[contains(@class, 'gc__excerpt')]")
+                    description = description_element.text if description_element else "N/A"
+
+                    # Extrae la fecha
+                    date_text = description.split('...')[0].strip()  # Extrae la fecha del texto de la descripción
+                    date = self.parse_date(date_text)
+
+                    # Calcula la diferencia en meses desde que se publicó la noticia
+                    months_difference = (current_date.year - date.year) * 12 + (current_date.month - date.month)
+                    if months_difference > months:
+                        continue
+
+                    # Cuenta las apariciones de la frase de búsqueda en el título y la descripción
+                    phrase_count = title.lower().count(search_phrase.lower()) + description.lower().count(search_phrase.lower())
+
+                    # Verifica si el título o la descripción contienen alguna cantidad de dinero
+                    contains_money = self.contains_money(title) or self.contains_money(description)
+
+                    # Añade los datos de la noticia a la lista
+                    self.news_data.append({
+                        "Title": title,
+                        "Date": date.strftime("%Y-%m-%d"),
+                        "Description": description,
+                        "URL": url,
+                        "Search Phrase Count": phrase_count,
+                        "Contains Money": contains_money
+                    })
+
+                except Exception as e:
+                    print(f"Error extracting data from news element: {e}")
+
+        except Exception as e:
+            print(f"Error waiting for news elements to load: {e}")
 
     def filter_category(self, category=None):
         """Filter news by category if specified (optional step)."""
         if category:
             # Implement filtering logic here if the site supports it
             pass
-
-    def scrape_news(self, months=0):
-        """Scrape the latest news within the given time period."""
-        articles = self.browser.find_elements("//li[contains(@class, 'js-stream-content')]")
-        current_date = datetime.now()
-
-        for article in articles:
-            try:
-                # Extract title, date, and description
-                title_element = article.find_element_by_xpath(".//h3")
-                title = title_element.text
-                date_element = article.find_element_by_xpath(".//time")
-                date_str = date_element.get_attribute("datetime")
-                date = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ")
-                description_element = article.find_element_by_xpath(".//p")
-                description = description_element.text if description_element else "N/A"
-                
-                # Calculate the number of months since the news was published
-                months_difference = (current_date.year - date.year) * 12 + (current_date.month - date.month)
-                if months_difference > months:
-                    continue
-
-                # Count occurrences of the search phrase
-                phrase_count = title.lower().count(search_phrase.lower()) + description.lower().count(search_phrase.lower())
-
-                # Check if the title or description contains any amount of money
-                contains_money = self.contains_money(title) or self.contains_money(description)
-
-                # Download the news picture
-                image_element = article.find_element_by_xpath(".//img")
-                image_url = image_element.get_attribute("src")
-                image_filename = self.download_image(image_url)
-
-                # Append news data to the list
-                self.news_data.append({
-                    "Title": title,
-                    "Date": date.strftime("%Y-%m-%d"),
-                    "Description": description,
-                    "Picture Filename": image_filename,
-                    "Search Phrase Count": phrase_count,
-                    "Contains Money": contains_money
-                })
-
-            except Exception as e:
-                print(f"Error scraping article: {e}")
 
     def contains_money(self, text):
         """Check if the text contains any amount of money."""
@@ -95,21 +140,3 @@ class NewsScraper:
     def close(self):
         """Close the browser."""
         self.browser.close_all_browsers()
-
-def main():
-    scraper = YahooNewsScraper()
-    try:
-        scraper.open_website("https://news.yahoo.com/")
-        search_phrase = "economy"  # Define your search phrase
-        category = "business"  # Define your category if applicable
-        months = 1  # Define the number of months to retrieve news for
-
-        scraper.search_news(search_phrase)
-        scraper.filter_category(category)
-        scraper.scrape_news(months)
-        scraper.save_to_excel()
-    finally:
-        scraper.close()
-
-if __name__ == "__main__":
-    main()
